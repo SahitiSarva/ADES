@@ -19,22 +19,15 @@ Fixed Errors -
 
 ```python
 import os
-import glob
-import plotly
-import osmnx as ox
-import plotly.express as px
-import networkx as nx
 import pandas as pd
 import geopandas as gpd
 import matplotlib.pyplot as plt
 import numpy as np
-from ipypb import track
-from shapely.geometry import Polygon, MultiPolygon
 from geopy.distance import vincenty
 ```
 
 ```python
-Data_Path = "C:\\Users\\sahit\\ADES\\ADES\\DataSource"
+data_path = os.getcwd()
 ```
 
 Potential Errors -
@@ -50,15 +43,7 @@ Possible approaches -
 
 
 ```python
-bridges = pd.read_excel(Data_Path + '\\BMMS_overview_SortedRoad.xlsx')
-```
-
-```python
-bridges.head(5)
-```
-
-```python
-bridges["type"].unique()
+bridges = pd.read_excel(data_path + '\\DataSource\\BMMS_overview_SortedRoad.xlsx')
 ```
 
 ```python
@@ -73,10 +58,6 @@ for i in range(len(bridges)):
 ```python
 bridges['lat'] = bridges['lat'].fillna(0)
 bridges['lon'] = bridges['lon'].fillna(0)
-```
-
-```python
-bridges['lon'].sort_values()
 ```
 
 ```python
