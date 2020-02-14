@@ -28,6 +28,8 @@ from tqdm.auto import tqdm
 ### Data Loading
 **Establish current file directory and read-in data file provided. Enter bridges file name as "data_file"**
 
+#### Update: Data loading and fudging complete for now. Skip to Data Correcting section and read in "bridges_cleaned.xlsx" (below) instead
+
 ```python
 data_path = os.getcwd() + "\\DataSource\\"
 ```
@@ -117,6 +119,12 @@ for i in tqdm(range(num), total=num):
 
 ```python
 bridges.to_excel("DataSource\\bridges_cleaned.xlsx")
+```
+
+### Data Correcting
+
+```python
+bridges = pd.read_excel(data_path + "bridges_cleaned.xlsx")
 ```
 
 ```python
