@@ -13,27 +13,40 @@ jupyter:
     name: python3
 ---
 
-Fixed Errors - 
-1. Exchanged latitudes and longotudes
-2. Replaced Nan latitudes and longitudes with zeroes
+### Import Libraries
 
 ```python
 import os
 import pandas as pd
 import geopandas as gpd
-import matplotlib.pyplot as plt
 import numpy as np
-from geopy.distance import vincenty
+from geopy.distance import geodesic
+import matplotlib.pyplot as plt
+from tqdm.auto import tqdm
+```
+
+### Data Loading
+**Establish current file directory and read-in data file provided. Enter bridges file name as "data_file"**
+
+```python
+data_path = os.getcwd() + "\\DataSource\\"
 ```
 
 ```python
-data_path = os.getcwd()
+data_file = "BMMS_overview.xlsx"
+```
+
+```python
+bridges = pd.read_excel(data_path + data_file)
 ```
 
 Potential Errors -
 1. Duplicate latitude and longitude 
 2. Zero latitude and longitude 
 
+Fixed Errors - 
+1. Exchanged latitudes and longotudes
+2. Replaced Nan latitudes and longitudes with zeroes
 
 Possible approaches - 
 1. Check the difference in latitude and longitude and it must be meaningful 
@@ -42,69 +55,74 @@ Possible approaches -
 4. Is it true that one road has one name?
 
 
-```python
-bridges = pd.read_excel(data_path + '\\DataSource\\BMMS_overview_SortedRoad.xlsx')
-```
+### Data Cleaning
+**Some bridges had latitude and longitudes flipped. This is addressed as follows:**
 
 ```python
 for i in range(len(bridges)):
-    if bridges['lat'][i]>90 :
-        c= bridges['lat'][i] 
+    if bridges['lat'][i]>90:
+        c = bridges['lat'][i] 
         bridges['lat'][i] = bridges['lon'][i] 
-        bridges['lon'][i] =c
-        
+        bridges['lon'][i] = c
 ```
+
+**Some bridges have no latitude or longitude information. For the time being, we fill these empty cells with 0.**
 
 ```python
 bridges['lat'] = bridges['lat'].fillna(0)
 bridges['lon'] = bridges['lon'].fillna(0)
 ```
 
-```python
-def distance_calc (lat1, lon1, lat2, lon2):
-    start = (lat1, lon1)
-    stop = (lat2, lon2)
+### Data Fudging
 
-    return vincenty(start, stop).kilometers
+**Thought Process**:
+1. The BMMS_overview dataset has multiple line items with the same ID ("road" column), which we assume to be a single connected bridge.
+2. It appears that the length of each bridge line item is approximately represented by the distance between its lat-long coordinates and that of the subsequent item.
+3. We observed that the length of a bridge is approximately equal to the preceding line item's length + the distance between that bridge and the line item that precedes it. Thus, we calculate the distances between each line item and its preceding line item. If the numbers do not approximately add up, we assume there is an error in the coordinates.
+
+```python
+bridges["coordinates"] = np.zeros
+
+for i in tqdm(range(len(bridges)), total=len(bridges)):
+    bridges["coordinates"][i] = (bridges["lat"][i], bridges["lon"][i])
 ```
 
 ```python
-lon = pd.concat([bridges['lon'].shift(), bridges.loc[1:, 'lon']], axis=1, ignore_index=True)
-lat = pd.concat([bridges['lat'].shift(), bridges.loc[1:, 'lat']], axis=1, ignore_index=True)
+bridges['dist'] = 0.000
 ```
 
 ```python
-lat.columns = ['startlat', 'stoplat']
-lon.columns = ['startlon', 'stoplon']
+num = len(bridges)-1
+
+for i in tqdm(range(num), total=num):
+    if bridges["road"][i] == bridges["road"][i+1]:
+        bridges['dist'][i] = geodesic(bridges["coordinates"][i], bridges["coordinates"][i+1]).kilometers
+    else:
+        continue
 ```
 
 ```python
-lon.drop(lon.index[0],inplace= True)
-lat.drop(lat.index[0],inplace= True)
+bridges["verification"] = 0.00
 ```
 
 ```python
-lon = lon.reset_index(drop = True)
-lat = lat.reset_index(drop = True)
+for i in tqdm(range(num), total=num):
+    if bridges["road"][i] == bridges["road"][i+1]:
+        bridges['verification'][i+1] = bridges["km"][i] + bridges["dist"][i]
+    else:
+        continue
+```
+
+*Save data file.*
+
+```python
+bridges.to_excel("DataSource\\bridges_cleaned.xlsx")
 ```
 
 ```python
-lat.head()
+bridges[["road", "lat", "lon", "length", "km", "dist", "verification"]]
 ```
 
 ```python
-lon.head()
-```
 
-```python
-bridges['dist']= np.zeros
-```
-
-```python
-for i in range(len(lon)):
-        bridges['dist'][i] = distance_calc(lat['startlat'][i], lon['startlon'][i],lat['stoplat'][i], lon['stoplon'][i] )
-```
-
-```python
-print("Hello")
 ```
