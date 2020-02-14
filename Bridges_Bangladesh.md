@@ -132,5 +132,9 @@ bridges[["road", "lat", "lon", "length", "km", "dist", "verification"]]
 ```
 
 ```python
+bridges[bridges['road'] == "N1"]
+```
+
+```python
 
 ```
