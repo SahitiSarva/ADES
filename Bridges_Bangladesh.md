@@ -53,6 +53,17 @@ bridges.nunique()
 
 **"structureNr" is the unique identifier for each line item.**
 
+```python
+bridges.shape
+```
+
+How many road name-LRP combinations have different structure numbers?
+
+```python
+a = bridges.groupby(['road', 'LRPName', 'km', 'zone', "division", "sub-division", "circle"]).agg({'structureNr': 'count'}).reset_index()
+print("Number of road name-LRP combinations with different structure numbers:",
+      len(a[a['structureNr']>1]))
+```
 
 ### Data Cleaning
 **Some bridges had latitude and longitudes flipped. This is addressed as follows:**
@@ -76,7 +87,45 @@ bridges = bridges[bridges["lat"]!=0]
 ```
 
 ```python
+bridges.shape
+```
+
+```python
 bridges = bridges.sort_values(["road","km"]).reset_index(drop=True)
+```
+
+```python
+bridges.dtypes
+```
+
+Find and drop all duplicates that have the same road name, LRPName, and "km" value
+
+```python
+def longeststring(s):
+    return max(s, key=len)
+```
+
+```python
+bridges['name'] = bridges['name'].astype(str)
+bridges['roadName'] = bridges['roadName'].astype(str)
+```
+
+```python
+grouped_bridges = bridges.groupby(['road', 'LRPName', 'km', 'zone', "division", "sub-division", "type", "circle"]).agg({'roadName': (lambda s: longeststring(s)), 'name': (lambda s: longeststring(s)), 'length': 'max', 'structureNr':'max'
+                                                                                                                , 'chainage': 'max', 'width':'max', 'constructionYear':'max', 'spans': 'max', 'lat':'max', 'lon':'max'
+                                                                                                                , 'EstimatedLoc': 'max', 'condition' : 'max'})
+```
+
+```python
+grouped_bridges = grouped_bridges.reset_index()
+```
+
+```python
+grouped_bridges.shape
+```
+
+```python
+print("Number of dropped duplicates:", bridges.shape[0] - grouped_bridges.shape[0])
 ```
 
 ### Data Fudging
@@ -87,17 +136,13 @@ bridges = bridges.sort_values(["road","km"]).reset_index(drop=True)
 3. We observed that the length of a bridge is approximately equal to the preceding line item's length + the distance between that bridge and the line item that precedes it. Thus, we calculate the distances between each line item and its preceding line item. If the numbers do not approximately add up, we assume there is an error in the coordinates.
 
 ```python
-# bridges["coordinates"] = np.zeros
-# bridges["coordinates"] = list(zip(bridges["lat"], bridges["lon"]))
-```
-
-```python
-bridges_self = pd.concat([bridges, bridges.shift(-1).add_suffix('2')],
-                         axis=1)[["lat", "lon", "lat2", "lon2", "road", "road2", "structureNr"]]
+bridges_self = pd.concat([grouped_bridges, grouped_bridges.shift(-1).add_suffix('2')],
+                         axis=1)[["lat", "lon", "lat2", "lon2", "road", "road2", "structureNr", "km"]]
 ```
 
 ```python
 bridges_self = bridges_self[bridges_self.road==bridges_self.road2]
+bridges_self = bridges_self.reset_index()
 ```
 
 ```python
@@ -112,164 +157,127 @@ bridges_self['dist'] = bridges_self.apply (lambda row: distance_calc (row),axis=
 ```
 
 ```python
-bridges = pd.merge(bridges, bridges_self[["dist", "structureNr"]], on = "structureNr", how = "left")
+bridges_self["verification"] = bridges_self["km"] + bridges_self["dist"]
+bridges_self["verification"] = bridges_self["verification"].shift(1)
 ```
 
 ```python
-bridges["verification"] = bridges["km"] + bridges["dist"]
-bridges["verification"] = bridges["verification"].shift(1)
-```
-
-```python
-bridges[["road", "km", "dist", "verification"]].head()
-```
-
-```python
-num = len(bridges)-1
-
-for i in tqdm(range(num), total=num):
-    if bridges["road"][i] != bridges["road"][i+1]:
-        bridges["dist"][i] = np.NaN
-        bridges["verification"][i+1] = np.NaN
-#         bridges['dist'][i] = geodesic(bridges["coordinates"][i], bridges["coordinates"][i+1]).kilometers
-#         bridges['verification'][i+1] = bridges["km"][i] + bridges["dist"][i]
-    else:
-        continue
-```
-
-*Save data file.*
-
-```python
-bridges.to_excel("DataSource\\bridges_cleaned.xlsx")
+grouped_bridges = pd.merge(grouped_bridges, bridges_self[["dist", "structureNr", "verification"]], on = "structureNr", how = "left")
 ```
 
 ### Data Correcting
 
-```python
-# bridges = pd.read_excel(data_path + "bridges_cleaned.xlsx")
-```
 
-**Visualize how some bridges are deviating....... explain**
+**Visualize how some bridges are deviating. Explain**
 
 ```python
-px.scatter(bridges[bridges['road'] == "N1"], x="km", y="verification", hover_name="LRPName")
+px.scatter(grouped_bridges[grouped_bridges['road'] == "N1"], x="km", y="verification", hover_name="LRPName")
 ```
 
 ```python
-bridges["deviation"] = abs(bridges["km"]-bridges["verification"])
+grouped_bridges["deviation"] = abs(grouped_bridges["km"]-grouped_bridges["verification"])
+```
+
+**However**, if there are 3 points in a row (e.g., points A, B, and C, in the order of increasing chainage) are wrongly placed with approximately the same magnitude of error, then the deviation/verification of point B will not reflect an error. This is because the distance from point B to point A are both calculated off wrong points. The verification/deviations calculated for point B will not reveal an error. Thus, we identify the points where points A and C have high deviations, but where point B is noted to have a low deviation value, and we replace the point B deviation with the point A deviation (an approximation). 
+
+```python
+num = len(grouped_bridges)-1
 ```
 
 ```python
-px.scatter(bridges, x = "road", y = "deviation", hover_name = bridges.index)
+id_fix=[]
+
+for i in tqdm(range(num), total = num):
+    try:
+        if (grouped_bridges["deviation"][i] >5) & (grouped_bridges["deviation"][i+2] > 5) & (grouped_bridges["deviation"][i+1] <= 5):
+            id_fix.append(i+1)
+    except KeyError:
+        continue
 ```
 
 ```python
-a = pd.concat([bridges, bridges.shift(+1).add_suffix('1')],
-                         axis=1)[["lat", "lon", "lat1", "lon1", "dist1",
-                                  "structureNr", "deviation"]]
-
-bridges_self = pd.concat([a, bridges.shift(+2).add_suffix('2')],
-                         axis=1)[["lat", "lon", "lat1", "lon1", "dist1", "lat2", "lon2",
-                                  "structureNr", "deviation"]]
+len(id_fix)
 ```
 
 ```python
-bridges_self = bridges_self[bridges_self["deviation"]>25]
+for i in id_fix:
+    grouped_bridges.deviation[i] = grouped_bridges.deviation[i-1]
 ```
 
 ```python
-bridges_self.head()
+px.scatter(grouped_bridges, x = "road", y = "deviation", hover_name = grouped_bridges.index)
+```
+
+We correct the row items with large deviations by approximating the correct coordinates based on difference in chainage (assumed to be correct distance between one row and the next) and the previous two coordinates.
+
+```python
+for i in tqdm(range(num), total=num):
+    try:
+        if grouped_bridges["road"][i] == grouped_bridges["road"][i-1]:
+            if grouped_bridges.deviation[i] > 5:
+                geod = Geodesic.WGS84.Inverse(grouped_bridges["lat"][i-2], grouped_bridges["lon"][i-2],
+                                              grouped_bridges["lat"][i-1], grouped_bridges["lon"][i-1])
+                line = Geodesic.WGS84.Line(geod['lat1'],geod['lon1'], geod['azi1'])
+    #             print(i, "old      ", grouped_bridges["lat"][i], grouped_bridges["lon"][i])
+    #             print(grouped_bridges["km"][i-1]-grouped_bridges["km"][i])
+                grouped_bridges["lat"][i] = line.Position(grouped_bridges["km"][i]-grouped_bridges["km"][i-2])["lat2"]
+                grouped_bridges["lon"][i] = line.Position(grouped_bridges["km"][i]-grouped_bridges["km"][i-2])["lon2"]
+    #             print(i, "corrected", grouped_bridges["lat"][i], grouped_bridges["lon"][i])
+        else:
+            continue
+    except KeyError:
+        continue
 ```
 
 ```python
-def reverse_calc (row):
-    geod = Geodesic.WGS84.Inverse(row["lat"], row["lon"], row["lat2"],row["lon2"])
-    line = Geodesic.WGS84.Line(geod['lat1'],geod['lon1'], geod['azi1'])
-    return line.Position(row["dist1"])["lat2"], line.Position(row["dist1"])["lon2"]
-```
-
-```python
-bridges_self["correctLat"] = 0.00
-bridges_self["correctLon"] = 0.00
-```
-
-```python
-amendedLatLon = bridges_self.apply(lambda row: reverse_calc(row), axis=1)
-```
-
-```python
-for i in tqdm(amendedLatLon.index, total=len(amendedLatLon.index)):
-    bridges_self["correctLat"][i] = amendedLatLon[i][0]
-    bridges_self["correctLon"][i] = amendedLatLon[i][1]
-```
-
-```python
-bridges_self.head()
-```
-
-```python
-bridges = pd.merge(bridges, bridges_self[["correctLat", "correctLon", "structureNr"]], on = "structureNr", how = "left")
-```
-
-```python
-bridges[["correctLat", "correctLon"]] = bridges[["correctLat", "correctLon"]].fillna(0)
-```
-
-*Save data file.*
-
-```python
-bridges.to_excel("DataSource\\bridges_cleaned.xlsx")
-```
-
-```python
-bridges['lat'] = np.where(bridges['correctLat']==0, bridges['lat'], bridges['correctLat'])
-bridges['lon'] = np.where(bridges['correctLon']==0, bridges['lon'], bridges['correctLon'])
-```
-
-### Check if the changed coordinates have corrected our errors by calculating new_dist and new_verification
-
-```python
-bridges_self = pd.concat([bridges, bridges.shift(-1).add_suffix('2')],
-                         axis=1)[["lat", "lon", "lat2", "lon2", "road", "road2", "structureNr"]]
-```
-
-```python
-bridges_self = bridges_self[bridges_self.road==bridges_self.road2]
-```
-
-```python
-bridges_self['new_dist'] = bridges_self.apply (lambda row: distance_calc (row),axis=1)
-```
-
-```python
-bridges_CHECK = pd.merge(bridges, bridges_self[["new_dist", "structureNr"]], on = "structureNr", how = "left")
-```
-
-```python
-bridges_CHECK["new_verification"] = bridges_CHECK["km"] + bridges_CHECK["new_dist"]
-bridges_CHECK["new_verification"] = bridges_CHECK["new_verification"].shift(1)
-```
-
-```python
-bridges_CHECK.columns
-```
-
-```python
-bridges_CHECK[bridges_CHECK["deviation"]>50][["road", "km", "dist", "verification", "new_dist", "new_verification"]].head()
-```
-
-### Seems like errors are unfixed. Send helpppp..............
-
-```python
-token = 'pk.eyJ1IjoianJ5YXA5IiwiYSI6ImNrMmJ6Y216ZDAwc3UzaHFiZjdwZzJuZWIifQ.7JqX5w0UIOMnHx7jNRC1Ag'
+token = "pk.eyJ1Ijoic2FoaXRpcyIsImEiOiJjazZtY3FvYzEwbWs4M2xsc25nOW1ndmo5In0.EWX1gLsUKxAIGorGR4czuQ"
 px.set_mapbox_access_token(token)
 ```
 
 ```python
-fig = px.scatter_mapbox(bridges, lat="lat", lon="lon", text="road", color="condition")
-fig.show()
+px.scatter_mapbox(grouped_bridges, lat ="lat", lon="lon", hover_name = grouped_bridges.index)
+```
+
+Amend the dataframe with corrected coordinates (grouped_bridges) such that it matches the dataframe (in terms of datatypes) of the original dataframe from the BMMS_overview.xlsx file.
+
+```python
+bridges_ori = pd.read_excel(data_path + data_file)
 ```
 
 ```python
-
+col_names = list(bridges_ori.columns)
+col_names.extend(["dist", "verification", "deviation"])
 ```
+
+```python
+grouped_bridges = grouped_bridges[col_names]
+```
+
+```python
+del grouped_bridges["deviation"]
+```
+
+```python
+del grouped_bridges["dist"]
+```
+
+```python
+del grouped_bridges["verification"]
+```
+
+```python
+for x in grouped_bridges.columns:
+    grouped_bridges[x]=grouped_bridges[x].astype(bridges_ori[x].dtypes.name)
+```
+
+*Save data file, match original BMMS_overview.xlsx file format (e.g., sheet name).*
+
+```python
+data_path
+```
+
+```python
+grouped_bridges.set_index("road").to_excel(data_path + "BMMS_overview.xlsx", sheet_name="BMMS_overview")
+```
+
+# Done!
